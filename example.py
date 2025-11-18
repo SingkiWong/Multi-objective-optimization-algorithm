@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from moapo import MOAPO
+from imoapo import IMOAPO
 from test_functions import get_test_function
 from metrics import evaluate_performance
 
@@ -183,6 +184,48 @@ def example_4_visualization():
     print("\n可视化结果已保存到: moapo_comparison.png")
 
 
+def example_5_vrp_imoapo():
+    """示例5：使用IMOAPO解决小规模车辆路径规划问题"""
+
+    print("\n" + "=" * 60)
+    print("示例5：IMOAPO 求解车辆路径规划")
+    print("=" * 60)
+
+    # 构造一个5个客户的简化VRP (节点0为仓库)
+    distance_matrix = np.array(
+        [
+            [0, 6, 9, 7, 3, 5],
+            [6, 0, 5, 3, 7, 4],
+            [9, 5, 0, 4, 8, 6],
+            [7, 3, 4, 0, 6, 5],
+            [3, 7, 8, 6, 0, 4],
+            [5, 4, 6, 5, 4, 0],
+        ],
+        dtype=float,
+    )
+
+    # 客户需求 (共5个客户，对应索引1-5)
+    demands = [1.5, 1.0, 1.7, 0.9, 1.2]
+
+    optimizer = IMOAPO(
+        distance_matrix=distance_matrix,
+        demands=demands,
+        vehicle_capacity=3.0,
+        n_vehicles=3,
+        n_particles=40,
+        n_iterations=80,
+    )
+
+    pareto_front, pareto_fitness = optimizer.optimize(verbose=False)
+
+    # 选择加权和最优解用于演示
+    scores = np.sum(pareto_fitness, axis=1)
+    best_idx = int(np.argmin(scores))
+
+    print(f"找到 {len(pareto_front)} 个Pareto候选解，展示其中一个：\n")
+    print(optimizer.summarize_solution(pareto_front[best_idx]))
+
+
 def main():
     """运行所有示例"""
     print("\nMOAPO算法使用示例\n")
@@ -192,6 +235,7 @@ def main():
     example_2_with_test_function()
     example_3_parameter_tuning()
     example_4_visualization()
+    example_5_vrp_imoapo()
 
     print("\n" + "=" * 60)
     print("所有示例运行完成！")

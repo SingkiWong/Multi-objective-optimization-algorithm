@@ -52,6 +52,7 @@ x_i,k(t+1) = x_i,k(t) + v_i,k(t)
 ```
 Multi-objective-optimization-algorithm/
 ├── moapo.py                 # MOAPO算法核心实现
+├── imoapo.py                # 面向车辆路径规划的IMOAPO扩展
 ├── test_functions.py        # 测试函数（Schaffer1, ZDT1, ZDT2, ZDT3）
 ├── metrics.py               # 性能评价指标（GD, SP, IGD, HV）
 ├── run_experiments.py       # 完整实验脚本
@@ -111,6 +112,39 @@ python run_experiments.py
 ```
 
 这将对所有测试函数（Schaffer1, ZDT1, ZDT2, ZDT3）运行实验，并生成性能统计和可视化结果。
+
+### 4. 车辆路径规划示例（IMOAPO）
+
+IMOAPO 继承 MOAPO 的物理启发式框架，并结合容量约束的贪心分割策略。
+下面展示一个包含 5 个客户的小型 VRP 示例：
+
+```python
+from imoapo import IMOAPO
+import numpy as np
+
+# 仓库 + 5 个客户的对称距离矩阵
+distance_matrix = np.array([
+    [0, 6, 9, 7, 3, 5],
+    [6, 0, 5, 3, 7, 4],
+    [9, 5, 0, 4, 8, 6],
+    [7, 3, 4, 0, 6, 5],
+    [3, 7, 8, 6, 0, 4],
+    [5, 4, 6, 5, 4, 0],
+])
+demands = [1.5, 1.0, 1.7, 0.9, 1.2]
+
+optimizer = IMOAPO(
+    distance_matrix=distance_matrix,
+    demands=demands,
+    vehicle_capacity=3.0,
+    n_vehicles=3,
+    n_particles=40,
+    n_iterations=80,
+)
+
+pareto_front, pareto_fitness = optimizer.optimize(verbose=False)
+print(optimizer.summarize_solution(pareto_front[0]))
+```
 
 ## 测试函数
 
