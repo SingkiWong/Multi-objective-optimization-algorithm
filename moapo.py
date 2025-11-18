@@ -9,7 +9,6 @@ MOAPO: Multi-Objective Artificial Physics Optimization
 
 import numpy as np
 from typing import List, Callable, Tuple
-import copy
 
 
 class MOAPO:
@@ -34,6 +33,8 @@ class MOAPO:
         引力因子初始值，默认100
     G_final : float
         引力因子终值，默认1
+    archive_size : int
+        外部档案容量（Pareto解集上限），默认与种群规模一致
     """
 
     def __init__(self,
@@ -44,7 +45,8 @@ class MOAPO:
                  w_initial: float = 0.9,
                  w_final: float = 0.4,
                  G_initial: float = 100.0,
-                 G_final: float = 1.0):
+                 G_final: float = 1.0,
+                 archive_size: int = None):
 
         self.n_objectives = n_objectives
         self.n_particles = n_particles
@@ -56,6 +58,9 @@ class MOAPO:
         self.w_final = w_final
         self.G_initial = G_initial
         self.G_final = G_final
+
+        # 外部档案（Pareto前沿）容量，默认与种群规模一致
+        self.archive_size = archive_size if archive_size is not None else n_particles
 
         # 初始化粒子位置和速度
         self.positions = None
@@ -91,6 +96,10 @@ class MOAPO:
 
         self.v_max = v_max
 
+        # 重置档案
+        self.pareto_front = []
+        self.pareto_fitness = []
+
     def evaluate(self, objective_funcs: List[Callable]):
         """
         评估所有粒子的适应值
@@ -106,30 +115,38 @@ class MOAPO:
             for j, func in enumerate(objective_funcs):
                 self.fitness[i, j] = func(self.positions[i])
 
-    def compute_aggregated_fitness(self):
+    def compute_aggregated_fitness(self, weights: np.ndarray = None):
         """
-        使用随机权重聚集方法计算聚合适应值
+        使用随机权重聚集方法计算聚合适应值，并返回使用的权重。
 
-        Returns:
-        --------
+        Parameters
+        ----------
+        weights : np.ndarray, optional
+            预先设定的聚合权重；为 ``None`` 时自动随机生成。
+
+        Returns
+        -------
         aggregated_fitness : np.ndarray
             聚合后的适应值 (n_particles,)
+        weights : np.ndarray
+            本次使用的聚合权重 (n_objectives,)
         """
-        # 为每个目标生成随机权重
-        weights = np.random.random(self.n_objectives)
+        if weights is None:
+            weights = np.random.random(self.n_objectives)
+
         weights = weights / np.sum(weights)  # 归一化
 
         # 计算加权和
         aggregated_fitness = np.dot(self.fitness, weights)
 
-        return aggregated_fitness
+        return aggregated_fitness, weights
 
-    def find_global_best_worst(self):
+    def find_global_best_worst(self, aggregated_fitness: np.ndarray):
         """
-        找到每个目标的全局最好和最差解，并计算聚合的全局最好最差值
+        基于聚合适应值寻找全局最好/最差解。
 
-        Returns:
-        --------
+        Returns
+        -------
         f_best : float
             聚合的全局最好适应值
         f_worst : float
@@ -138,37 +155,21 @@ class MOAPO:
             全局最好解位置
         gworst : np.ndarray
             全局最差解位置
+        best_idx : int
+            最好解索引
+        worst_idx : int
+            最差解索引
         """
-        # 找到每个目标的最好和最差索引（假设最小化）
-        self.best_indices = np.argmin(self.fitness, axis=0)
-        self.worst_indices = np.argmax(self.fitness, axis=0)
+        best_idx = int(np.argmin(aggregated_fitness))
+        worst_idx = int(np.argmax(aggregated_fitness))
 
-        # 获取每个目标的最好和最差适应值
-        best_fitness = np.array([self.fitness[self.best_indices[i], i]
-                                 for i in range(self.n_objectives)])
-        worst_fitness = np.array([self.fitness[self.worst_indices[i], i]
-                                  for i in range(self.n_objectives)])
+        f_best = aggregated_fitness[best_idx]
+        f_worst = aggregated_fitness[worst_idx]
 
-        # 为每个目标的最好解生成随机权重并聚合
-        weights_best = np.random.random(self.n_objectives)
-        weights_best = weights_best / np.sum(weights_best)
+        gbest = self.positions[best_idx].copy()
+        gworst = self.positions[worst_idx].copy()
 
-        weights_worst = np.random.random(self.n_objectives)
-        weights_worst = weights_worst / np.sum(weights_worst)
-
-        # 聚合全局最好和最差位置
-        gbest = np.zeros(self.n_dim)
-        gworst = np.zeros(self.n_dim)
-
-        for i in range(self.n_objectives):
-            gbest += weights_best[i] * self.positions[self.best_indices[i]]
-            gworst += weights_worst[i] * self.positions[self.worst_indices[i]]
-
-        # 计算聚合后的全局最好和最差适应值
-        f_best = np.dot(best_fitness, weights_best)
-        f_worst = np.dot(worst_fitness, weights_worst)
-
-        return f_best, f_worst, gbest, gworst
+        return f_best, f_worst, gbest, gworst, best_idx, worst_idx
 
     def compute_mass(self, aggregated_fitness: np.ndarray,
                      f_best: float, f_worst: float):
@@ -191,12 +192,16 @@ class MOAPO:
         """
         # 避免除零
         if abs(f_worst - f_best) < 1e-10:
-            return np.ones(self.n_particles)
+            return np.ones(self.n_particles) / self.n_particles
 
-        # 根据公式(1)计算质量
-        mass = np.exp((f_best - aggregated_fitness) / (f_worst - f_best))
+        # 根据公式(1)计算质量，并对质量进行归一化以防止数值爆炸
+        raw_mass = np.exp((f_best - aggregated_fitness) / (f_worst - f_best))
+        mass_sum = np.sum(raw_mass)
 
-        return mass
+        if mass_sum < 1e-12:
+            return np.ones(self.n_particles) / self.n_particles
+
+        return raw_mass / mass_sum
 
     def compute_forces(self, mass: np.ndarray,
                        aggregated_fitness: np.ndarray,
@@ -307,7 +312,7 @@ class MOAPO:
         self.positions = np.clip(self.positions, self.bounds[:, 0], self.bounds[:, 1])
 
     def update_pareto_front(self):
-        """更新Pareto前沿解集"""
+        """更新Pareto前沿解集并使用拥挤距离截断到档案容量。"""
         # 合并当前解和已有Pareto解
         all_positions = list(self.positions)
         all_fitness = list(self.fitness)
@@ -335,9 +340,18 @@ class MOAPO:
             if not dominated:
                 pareto_indices.append(i)
 
-        # 更新Pareto前沿
-        self.pareto_front = [all_positions[i] for i in pareto_indices]
-        self.pareto_fitness = [all_fitness[i] for i in pareto_indices]
+        pareto_positions = [all_positions[i] for i in pareto_indices]
+        pareto_fitness = [all_fitness[i] for i in pareto_indices]
+
+        # 按拥挤距离排序并截断到档案容量
+        if len(pareto_positions) > self.archive_size:
+            distances = self._crowding_distance(np.array(pareto_fitness))
+            sorted_indices = np.argsort(-distances)  # 拥挤距离大优先
+            pareto_positions = [pareto_positions[i] for i in sorted_indices[:self.archive_size]]
+            pareto_fitness = [pareto_fitness[i] for i in sorted_indices[:self.archive_size]]
+
+        self.pareto_front = pareto_positions
+        self.pareto_fitness = pareto_fitness
 
     def _dominates(self, fitness1, fitness2):
         """
@@ -356,6 +370,34 @@ class MOAPO:
         """
         # fitness1至少在一个目标上更好，且在所有目标上不差于fitness2
         return np.all(fitness1 <= fitness2) and np.any(fitness1 < fitness2)
+
+    def _crowding_distance(self, fitness_array: np.ndarray) -> np.ndarray:
+        """计算拥挤距离，用于档案截断保持解集分布。"""
+        n_solutions, n_obj = fitness_array.shape
+
+        if n_solutions == 0:
+            return np.array([])
+
+        distances = np.zeros(n_solutions)
+
+        for m in range(n_obj):
+            # 按当前目标排序
+            sorted_indices = np.argsort(fitness_array[:, m])
+            distances[sorted_indices[0]] = distances[sorted_indices[-1]] = np.inf
+
+            f_min = fitness_array[sorted_indices[0], m]
+            f_max = fitness_array[sorted_indices[-1], m]
+
+            # 避免除零
+            if f_max - f_min < 1e-12:
+                continue
+
+            for idx in range(1, n_solutions - 1):
+                prev_f = fitness_array[sorted_indices[idx - 1], m]
+                next_f = fitness_array[sorted_indices[idx + 1], m]
+                distances[sorted_indices[idx]] += (next_f - prev_f) / (f_max - f_min)
+
+        return distances
 
     def optimize(self, objective_funcs: List[Callable], verbose: bool = True):
         """
@@ -384,10 +426,11 @@ class MOAPO:
             self.evaluate(objective_funcs)
 
             # 步骤2: 计算聚合适应值
-            aggregated_fitness = self.compute_aggregated_fitness()
+            aggregated_fitness, _ = self.compute_aggregated_fitness()
 
             # 步骤3: 找到全局最好和最差
-            f_best, f_worst, gbest, gworst = self.find_global_best_worst()
+            f_best, f_worst, gbest, gworst, best_idx, worst_idx = self.find_global_best_worst(
+                aggregated_fitness)
 
             # 步骤4: 计算质量
             mass = self.compute_mass(aggregated_fitness, f_best, f_worst)
@@ -396,7 +439,6 @@ class MOAPO:
             w, G = self.update_parameters(iteration)
 
             # 步骤6: 计算力
-            best_idx = np.argmin(aggregated_fitness)
             forces = self.compute_forces(mass, aggregated_fitness, best_idx, G)
 
             # 步骤7: 更新速度和位置
