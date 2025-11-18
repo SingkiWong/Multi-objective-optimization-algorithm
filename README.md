@@ -12,6 +12,7 @@ MOAPO (Multi-Objective Artificial Physics Optimization) 是一种基于拟态物
 - **多目标处理**：使用随机权重聚集方法处理多个目标
 - **动态参数**：惯性权重和引力因子随迭代动态调整
 - **良好的分布性**：能够获得分布均匀的Pareto前沿
+- **外部档案**：维护非支配解档案，并用拥挤距离截断保证多样性
 
 ## 算法原理
 
@@ -44,6 +45,7 @@ x_i,k(t+1) = x_i,k(t) + v_i,k(t)
 
 - **惯性权重w**：从0.9线性下降到0.4（前3/4迭代）
 - **引力因子G**：从100线性下降到1
+- **外部档案截断**：使用拥挤距离排序，超出容量时优先保留稀疏区域的解
 
 ## 项目结构
 
@@ -168,6 +170,7 @@ SP = sqrt((1/(n-1)) * Σ (d̄ - d_i)²)
 | w_final | 0.4 | 惯性权重终值 |
 | G_initial | 100.0 | 引力因子初始值 |
 | G_final | 1.0 | 引力因子终值 |
+| archive_size | 粒子数量 | 外部档案容量，保持Pareto解集上限并通过拥挤距离选择 |
 
 ## 算法流程
 
@@ -177,7 +180,7 @@ SP = sqrt((1/(n-1)) * Σ (d̄ - d_i)²)
 4. **计算质量**：根据适应值计算粒子质量
 5. **计算力**：计算粒子间的虚拟引力和斥力
 6. **更新速度和位置**：根据力和质量更新粒子运动状态
-7. **更新Pareto前沿**：维护非支配解集
+7. **更新Pareto前沿**：合并当前群体与外部档案，过滤非支配解并用拥挤距离截断至档案容量
 8. **重复2-7**直到达到最大迭代次数
 
 ## 实验结果示例
@@ -188,16 +191,16 @@ SP = sqrt((1/(n-1)) * Σ (d̄ - d_i)²)
 快速测试：Schaffer1函数
 ==================================================
 Iteration 1/50, Pareto solutions: 3, w: 0.900, G: 100.000
-Iteration 11/50, Pareto solutions: 82, w: 0.765, G: 80.200
-Iteration 21/50, Pareto solutions: 140, w: 0.630, G: 60.400
-Iteration 31/50, Pareto solutions: 191, w: 0.495, G: 40.600
-Iteration 41/50, Pareto solutions: 217, w: 0.400, G: 20.800
-Iteration 50/50, Pareto solutions: 237, w: 0.400, G: 2.980
+Iteration 11/50, Pareto solutions: 30, w: 0.765, G: 80.200
+Iteration 21/50, Pareto solutions: 30, w: 0.630, G: 60.400
+Iteration 31/50, Pareto solutions: 30, w: 0.495, G: 40.600
+Iteration 41/50, Pareto solutions: 30, w: 0.400, G: 20.800
+Iteration 50/50, Pareto solutions: 30, w: 0.400, G: 2.980
 
 性能指标:
-  找到 237 个Pareto解
-  GD: 0.001480
-  SP: 0.028871
+  找到 30 个Pareto解
+  GD: 0.003259
+  SP: 0.069369
 ```
 
 ## 参考文献
